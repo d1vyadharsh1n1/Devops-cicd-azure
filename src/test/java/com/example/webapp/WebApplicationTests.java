@@ -31,4 +31,9 @@ class WebApplicationTests {
            .andExpect(status().isOk())
            .andExpect(jsonPath("$.status").value("UP"));
     }
+    @Test
+    void homepageLoadsTodoFrontend() throws Exception {
+        mvc.perform(get("/"))
+                .andExpect(status().isOk());
+    }
 }

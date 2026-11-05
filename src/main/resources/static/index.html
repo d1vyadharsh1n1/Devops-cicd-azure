@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TodoFlow | Task Manager</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">YOUR PERSONAL WORKSPACE</p>
+          <h1>Todo<span>Flow.</span></h1>
+          <p class="subtitle">Make today count. One task at a time.</p>
+        </div>
+        <div class="date-card">
+          <span>YOUR TASK BOARD</span>
+          <strong id="today"></strong>
+        </div>
+      </header>
+
+      <section class="stats">
+        <div class="stat-card">
+          <span>Total tasks</span>
+          <strong id="totalCount">0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Pending</span>
+          <strong id="pendingCount">0</strong>
+        </div>
+        <div class="stat-card">
+          <span>Completed</span>
+          <strong id="completedCount">0</strong>
+        </div>
+      </section>
+
+      <main class="content">
+        <section class="form-card">
+          <h2 id="formHeading">Create a task</h2>
+          <p>Add something you want to accomplish.</p>
+
+          <form id="todoForm">
+            <label for="title">Task title</label>
+            <input
+              id="title"
+              type="text"
+              placeholder="e.g. Complete Spring Boot project"
+              maxlength="120"
+              required
+            />
+
+            <label for="description">Description</label>
+            <textarea
+              id="description"
+              placeholder="Add a few details..."
+              rows="3"
+            ></textarea>
+
+            <div class="form-actions">
+              <button type="submit" id="submitButton" class="primary-btn">
+                + Add task
+              </button>
+              <button
+                type="button"
+                id="cancelButton"
+                class="secondary-btn hidden"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section class="tasks-section">
+          <div class="tasks-heading">
+            <div>
+              <h2>My tasks</h2>
+              <p>Stay focused and keep moving forward.</p>
+            </div>
+          </div>
+
+          <div class="filters">
+            <button class="filter active" data-filter="all">All</button>
+            <button class="filter" data-filter="pending">Pending</button>
+            <button class="filter" data-filter="completed">Completed</button>
+          </div>
+
+          <div id="taskList" class="task-list"></div>
+          <p id="message" class="message"></p>
+        </section>
+      </main>
+
+      <footer>
+        TodoFlow · Built with Spring Boot
+        <span id="version"></span>
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
