@@ -1,10 +1,14 @@
 title = "webapp gitleaks config"
 
 [extend]
-useDefault = true     # keep all built-in rules (AWS, GCP, GitHub tokens, private keys, ...)
+useDefault = true     # keep all built-in rules (AWS, GCP, Azure, GitHub tokens, private keys, ...)
 
 [allowlist]
-description = "Paths that never contain real secrets"
+description = "Known-safe items"
 paths = [
   '''(^|/)target/''',
+]
+regexes = [
+  # Fake demo key that was committed once as an example inside docs/VERIFY.md
+  '''AKIAQ3EGRTYUIOP5ABCD''',
 ]
