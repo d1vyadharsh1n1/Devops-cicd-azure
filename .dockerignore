@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.vscode
+docs
+k8s
+ansible
+scripts
+*.md
+# Only the built JAR is needed in the image context
+target/*
+!target/app.jar

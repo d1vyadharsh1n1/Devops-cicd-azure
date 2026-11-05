@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: webapp
+  labels:
+    app.kubernetes.io/name: webapp
+spec:
+  type: LoadBalancer          # Azure provisions a Standard load balancer with a public IP
+  selector:
+    app.kubernetes.io/name: webapp
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

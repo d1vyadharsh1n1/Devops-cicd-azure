@@ -1,0 +1,10 @@
+title = "webapp gitleaks config"
+
+[extend]
+useDefault = true     # keep all built-in rules (AWS, GCP, GitHub tokens, private keys, ...)
+
+[allowlist]
+description = "Paths that never contain real secrets"
+paths = [
+  '''(^|/)target/''',
+]

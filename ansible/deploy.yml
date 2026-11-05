@@ -1,0 +1,41 @@
+---
+# Usage (after `az aks get-credentials ... --admin`):
+#   ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+#       -e image=REGION-docker.pkg.dev/PROJECT/REPO/webapp@sha256:... -e app_version=<git-sha>
+- name: Deploy webapp to AKS
+  hosts: k8s_deploy
+  gather_facts: false
+  vars:
+    k8s_dir: "{{ playbook_dir }}/../k8s"
+    namespace: webapp
+    image: ""
+    app_version: "local"
+  tasks:
+    - name: Refuse to run without an image reference
+      ansible.builtin.assert:
+        that:
+          - image | length > 0
+        fail_msg: "Pass the image with -e image=<registry/path@sha256:digest>"
+
+    - name: Apply namespace, service account, service, HPA and PDB
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_dir }}/{{ item }}"
+      loop:
+        - namespace.yaml
+        - serviceaccount.yaml
+        - service.yaml
+        - hpa.yaml
+        - pdb.yaml
+
+    - name: Apply Deployment (rendered from template) and wait for the rollout
+      kubernetes.core.k8s:
+        state: present
+        template: "{{ k8s_dir }}/deployment.yaml.j2"
+        wait: true
+        wait_timeout: 300
+      register: rollout
+
+    - name: Show what changed
+      ansible.builtin.debug:
+        msg: "Deployment applied; changed={{ rollout.changed }}; image={{ image }}"

@@ -1,0 +1,245 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs that need more ask for it explicitly
+permissions:
+  contents: read
+
+# One deploy at a time on main; superseded PR runs are cancelled
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  AKS_CLUSTER: ${{ vars.AKS_CLUSTER }}
+  IMAGE_NAME: webapp
+
+jobs:
+  # ------------------------------------------------------------------ 1. SECRET SCAN
+  secret-scan:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout (full history so every commit is scanned)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # Only needed if the repo belongs to a GitHub *organization*:
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ------------------------------------------------------------------ 2. BUILD + TEST + SAST
+  build-test:
+    name: Build, test and code quality (Maven + SonarCloud)
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Checkout (full history for Sonar blame/new-code detection)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compile, run unit tests, package (JaCoCo coverage)
+        run: mvn -B -ntp verify
+
+      - name: SonarCloud analysis + quality gate
+        if: ${{ env.SONAR_TOKEN != '' }}
+        run: >
+          mvn -B -ntp org.sonarsource.scanner.maven:sonar-maven-plugin:5.0.0.4389:sonar
+          -Dsonar.host.url=https://sonarcloud.io
+          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+          -Dsonar.qualitygate.wait=true
+
+      - name: Test summary
+        if: always()
+        run: |
+          {
+            echo "### Unit test results"
+            python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          t=f=e=s=0
+          for p in glob.glob("target/surefire-reports/TEST-*.xml"):
+              r=ET.parse(p).getroot()
+              t+=int(r.get("tests",0)); f+=int(r.get("failures",0)); e+=int(r.get("errors",0)); s+=int(r.get("skipped",0))
+          print(f"- tests: **{t}**, failures: **{f}**, errors: **{e}**, skipped: **{s}**")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test + coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          if-no-files-found: warn
+
+      - name: Upload JAR (the exact artifact that gets containerised)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/app.jar
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------ 3. IMAGE BUILD / SCAN / PUSH
+  docker:
+    name: Build, scan and push image (Azure Container Registry)
+    needs: [secret-scan, build-test]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # needed for keyless auth to Azure (OIDC federated credential)
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JAR built and tested in the previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: target
+
+      - name: Log in to Azure (OIDC, no stored password or secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to Azure Container Registry
+        run: az acr login --name "${ACR_NAME}"
+
+      - name: Build image (tag = commit SHA, never 'latest')
+        run: |
+          IMAGE="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${GITHUB_SHA}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          docker build --build-arg GIT_SHA="${GITHUB_SHA}" -t "${IMAGE}" .
+
+      - name: Scan image for vulnerabilities (Trivy) - fails on fixable HIGH/CRITICAL
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Push image and capture immutable digest
+        id: push
+        run: |
+          docker push "${IMAGE}"
+          DIGEST_REF="$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}")"
+          echo "image=${DIGEST_REF}" >> "$GITHUB_OUTPUT"
+          echo "### Image published" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${DIGEST_REF}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------------------------ 4. DEPLOY + VERIFY
+  deploy:
+    name: Deploy to AKS (Ansible) and verify
+    needs: docker
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.verify.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure (OIDC, no stored password or secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group "${AZURE_RESOURCE_GROUP}" \
+            --name "${AKS_CLUSTER}" \
+            --admin --overwrite-existing
+          kubectl get nodes
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Ansible + Kubernetes collection
+        run: |
+          pip install "ansible-core>=2.16,<2.18" "kubernetes>=29" PyYAML jsonpatch
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Deploy with Ansible
+        run: |
+          ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+            -e "image=${{ needs.docker.outputs.image }}" \
+            -e "app_version=${GITHUB_SHA}"
+
+      - name: Verify rollout and application availability
+        id: verify
+        run: |
+          set -euo pipefail
+          kubectl -n webapp rollout status deployment/webapp --timeout=300s
+          kubectl -n webapp get deploy,pods,svc,hpa,pdb -o wide
+
+          echo "Waiting for the load balancer IP..."
+          IP=""
+          for i in $(seq 1 40); do
+            IP="$(kubectl -n webapp get svc webapp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+            [ -n "$IP" ] && break
+            sleep 10
+          done
+          [ -n "$IP" ] || { echo "::error::Service never received an external IP"; exit 1; }
+          URL="http://${IP}"
+
+          echo "Smoke test: expecting version ${GITHUB_SHA}"
+          for i in $(seq 1 30); do
+            V="$(curl -fsS --max-time 5 "${URL}/api/version" | jq -r .version 2>/dev/null || true)"
+            if [ "$V" = "${GITHUB_SHA}" ]; then
+              echo "New version is serving traffic"
+              curl -fsS "${URL}/actuator/health" | grep -q '"status":"UP"'
+              echo "url=${URL}" >> "$GITHUB_OUTPUT"
+              {
+                echo "### Deployed"
+                echo "- URL: ${URL}"
+                echo "- Version: \`${GITHUB_SHA}\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "  attempt $i: got '${V}', retrying..."
+            sleep 10
+          done
+          echo "::error::Endpoint did not report the expected version"
+          kubectl -n webapp describe deployment webapp || true
+          kubectl -n webapp logs -l app.kubernetes.io/name=webapp --tail=50 || true
+          exit 1
