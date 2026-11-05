@@ -117,7 +117,7 @@ Use throwaway branches + a PR. Never merge them.
 **H1. Gitleaks blocks a leaked secret**
 ```bash
 git checkout -b test/leak
-echo 'aws_access_key_id = "AKIAQ3EGRTYUIOP5ABCD"' > leak.txt     # fake key, matches AWS pattern
+echo "aws_access_key_id = \"AKIA$(echo ZXCVBNMQWERTYUI2)\"" > leak.txt   # fake key assembled at run time, so this doc itself holds no key-like text
 git add leak.txt
 gitleaks detect --no-git --source . -v   # local check: should report a finding, exit code 1
 git commit -m "test leak" && git push -u origin test/leak          # open a PR
