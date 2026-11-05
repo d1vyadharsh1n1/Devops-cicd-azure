@@ -32,7 +32,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Checkout (full history so every commit is scanned)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Gitleaks
@@ -51,7 +51,7 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout (full history for Sonar blame/new-code detection)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -118,7 +118,7 @@ jobs:
     outputs:
       image: ${{ steps.push.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download JAR built and tested in the previous job
         uses: actions/download-artifact@v4
@@ -172,7 +172,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Log in to Azure (OIDC, no stored password or secret)
         uses: azure/login@v2
