@@ -20,7 +20,7 @@
   <properties>
     <java.version>17</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <jacoco.version>0.8.12</jacoco.version>
+    <jacoco.version>0.8.16</jacoco.version>
     <!-- SonarCloud / SonarQube: coverage report written by JaCoCo -->
     <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
   </properties>
